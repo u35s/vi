@@ -42,7 +42,8 @@ func GetTermiosAndMakeRaw(fd int, newterm, oldterm *syscall.Termios, flags int) 
 	 * is received and IXANY=1.
 	 */
 	if flags&TERMIOS_RAW_CRNL_INPUT > 0 {
-		/* dont recognize INT/QUIT/SUSP chars */
+		/* IXON=0: XON/XOFF chars are treated as normal chars (why we do this?) */
+		/* dont convert CR to NL on input */
 		newterm.Iflag &= ^uint32(syscall.IXON | syscall.ICRNL)
 	}
 
