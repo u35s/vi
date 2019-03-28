@@ -136,7 +136,7 @@ func (g *globals) end_line(p int) int {
 func (g *globals) next_line(p int) int {
 	p = g.end_line(p)
 	log.Printf("end line p %d, g.end %d", p, g.end)
-	if p <= g.end && g.text[p] == '\n' {
+	if p < g.end && g.text[p] == '\n' {
 		p++
 	}
 	return p
