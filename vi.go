@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"syscall"
-	"time"
 )
 
 const (
@@ -43,10 +44,15 @@ type globals struct {
 	screenbegin int
 	end         int
 	tabstop     int
+	dot         int
+	cmd_mode    int
+
+	last_input_char byte
 
 	term_orig syscall.Termios
 
 	scr_out_buf [MAX_SCR_COLS + MAX_TABSTOP*2]byte
+	readbuffer  [KEYCODE_BUFFER_SIZE]byte
 }
 
 func (g *globals) init() {
@@ -91,6 +97,8 @@ func (g *globals) format_line(src int) []byte {
 	var co int = 0
 	for co < g.columns+g.tabstop {
 		if src < g.end {
+			c = g.text[src]
+			src++
 		}
 		dest[co] = c
 		co++
@@ -101,11 +109,40 @@ func (g *globals) format_line(src int) []byte {
 	return dest[:co]
 }
 
+func (g *globals) begin_line(d int) int { // return index to first char for cur line
+	return 0
+}
+
+//----- Synchronize the cursor to Dot --------------------------
+func (g *globals) sync_cursor(d int, row, col *int) {
+	var co, ro = 0, 0
+	beg_cur := g.begin_line(d)
+	if beg_cur < g.screenbegin {
+	} else {
+	}
+	tp := g.screenbegin
+
+	// find out what col "d" is on
+	for tp < d {
+		co++
+		tp++
+	}
+	*row = ro
+	*col = co
+}
+
 func (g *globals) refresh(full_screen bool) {
-	// g.sync_cursor(g.dot, &g.crow, &g.ccol)
+	g.sync_cursor(g.dot, &g.crow, &g.ccol)
 	tp := g.screenbegin
 	for li := 0; li < g.rows-1; li++ {
 		out_buf := g.format_line(tp)
+		if tp < g.end {
+			n := strings.Index(string(g.text[tp:g.end]), "\n")
+			if n < 0 {
+				n = g.end - 1
+			}
+			tp = n + 1
+		}
 
 		changed := false
 		var cs = 0
@@ -115,7 +152,7 @@ func (g *globals) refresh(full_screen bool) {
 		// compare newly formatted buffer with virtual screen
 		// look backward for last difference between out_buf and screen
 		for ; cs <= ce; cs++ {
-			if out_buf[cs] != sp[cs] {
+			if cs < len(out_buf) && out_buf[cs] != sp[cs] {
 				changed = true
 				break
 			}
@@ -128,8 +165,8 @@ func (g *globals) refresh(full_screen bool) {
 				break
 			}
 		}
+		log.Printf("%s,%d,%d,li:%d\n", out_buf, cs, ce, li)
 		if changed {
-			log.Printf("%s,%d,%d\n", out_buf, cs, ce)
 			copy(sp[cs:], out_buf[cs:ce+1])
 			g.place_cursor(li, cs)
 			fmt.Printf("%s", sp[cs:ce+1])
@@ -151,6 +188,81 @@ func (g *globals) new_screen(row, col int) {
 	}
 }
 
+func (g *globals) get_one_char() int {
+	var c [1]byte
+	n, err := os.Stdin.Read(c[:])
+	if err != nil || n != 1 {
+		log.Printf("read n %v, err %v", n, err)
+		g.cookmode()
+		os.Exit(1)
+	}
+	return int(c[0])
+}
+
+func (g *globals) do_cmd(c int) {
+	switch c {
+	case
+		KEYCODE_UP,
+		KEYCODE_DOWN,
+		KEYCODE_LEFT,
+		KEYCODE_RIGHT,
+		KEYCODE_HOME,
+		KEYCODE_END,
+		KEYCODE_PAGEUP,
+		KEYCODE_PAGEDOWN,
+		KEYCODE_DELETE:
+		goto key_cmd_mode
+	}
+	if g.cmd_mode == 2 {
+	}
+	if g.cmd_mode == 1 {
+		if 1 <= c || strconv.IsPrint(rune(c)) {
+			g.dot = g.char_insert(g.dot, c)
+		}
+		goto dc1
+	}
+key_cmd_mode:
+	switch c {
+	case 'i':
+		g.cmd_mode = 1
+	}
+dc1:
+}
+
+func (g *globals) text_hole_make(p int, size int) int {
+	var bias int = 0
+	if size <= 0 {
+		return bias
+	}
+	g.end += size
+	if g.end >= len(g.text) {
+	}
+	copy(g.text[p+size:], g.text[p:g.end-size])
+	for i := 0; i < size; i++ {
+		g.text[p+i] = ' '
+	}
+	return bias
+}
+
+func (g *globals) stupid_insert(p int, c int) int {
+	bias := g.text_hole_make(p, 1)
+	p += bias
+	g.text[p] = byte(c)
+	return bias
+}
+
+func (g *globals) char_insert(p int, c int) int {
+	if c == 27 { // Is this an ESC?
+		g.cmd_mode = 0
+	} else {
+		if c == '\r' {
+			c = '\n'
+		}
+		p += 1 + g.stupid_insert(p, c)
+	}
+	return p
+}
+
 func (g *globals) init_text_buffer(f string) {
 	g.text = make([]byte, 10240)
 	g.screenbegin = 0
@@ -165,12 +277,20 @@ func (g *globals) edit_file(f string) {
 	g.new_screen(g.rows, g.columns)
 	g.init_text_buffer(f)
 
+	g.crow = 0
+	g.ccol = 0
+	g.cmd_mode = 0 // 0=command  1=insert  2='R'eplace
 	g.tabstop = 8
 	g.redraw(false)
 
+	var c int
 	for g.editing > 0 {
-		time.Sleep(1e9 * 5)
-		g.editing = 0
+		c = g.get_one_char()
+		g.last_input_char = byte(c)
+		g.do_cmd(c)
+		if g.readbuffer[0] == 0 {
+			g.refresh(false)
+		}
 	}
 	g.cookmode()
 }
