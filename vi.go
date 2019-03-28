@@ -99,6 +99,9 @@ func (g *globals) format_line(src int) []byte {
 		if src < g.end {
 			c = g.text[src]
 			src++
+			if c == '\n' {
+				break
+			}
 		}
 		dest[co] = c
 		co++
@@ -110,17 +113,52 @@ func (g *globals) format_line(src int) []byte {
 }
 
 func (g *globals) begin_line(d int) int { // return index to first char for cur line
-	return 0
+	if d > 0 && d < len(g.text) {
+		n := strings.LastIndex(string(g.text[:d]), "\n")
+		if n < 0 {
+			return 0
+		}
+		return n + 1
+	}
+	return d
+}
+
+func (g *globals) end_line(p int) int {
+	if p >= 0 && p < g.end {
+		n := strings.Index(string(g.text[p:g.end]), "\n")
+		if n < 0 {
+			return g.end
+		}
+		return p + n
+	}
+	return p
+}
+func (g *globals) next_line(p int) int {
+	p = g.end_line(p)
+	log.Printf("end line p %d, g.end %d", p, g.end)
+	if p <= g.end && g.text[p] == '\n' {
+		p++
+	}
+	return p
 }
 
 //----- Synchronize the cursor to Dot --------------------------
 func (g *globals) sync_cursor(d int, row, col *int) {
 	var co, ro = 0, 0
 	beg_cur := g.begin_line(d)
+	log.Printf("sync cursor beg_cur %d, screenbegin %d",
+		beg_cur, g.screenbegin)
 	if beg_cur < g.screenbegin {
 	} else {
 	}
 	tp := g.screenbegin
+	for ro = 0; ro < g.rows-1; ro++ {
+		log.Printf("sync cursor tp %d, beg_cur %d", tp, beg_cur)
+		if tp == beg_cur {
+			break
+		}
+		tp = g.next_line(tp)
+	}
 
 	// find out what col "d" is on
 	for tp < d {
@@ -129,6 +167,7 @@ func (g *globals) sync_cursor(d int, row, col *int) {
 	}
 	*row = ro
 	*col = co
+	log.Printf("sync cursor row %d,col %d", ro, co)
 }
 
 func (g *globals) refresh(full_screen bool) {
@@ -200,6 +239,7 @@ func (g *globals) get_one_char() int {
 }
 
 func (g *globals) do_cmd(c int) {
+	log.Printf("do cmd %d", c)
 	switch c {
 	case
 		KEYCODE_UP,
@@ -223,8 +263,11 @@ func (g *globals) do_cmd(c int) {
 	}
 key_cmd_mode:
 	switch c {
-	case 'i':
-		g.cmd_mode = 1
+	case 27: // esc
+		g.cmd_mode = 0
+	case 'i', KEYCODE_INSERT: // i- insert before current char // Cursor Key Insert
+		// dc_i:
+		g.cmd_mode = 1 // start inserting
 	}
 dc1:
 }
@@ -235,6 +278,7 @@ func (g *globals) text_hole_make(p int, size int) int {
 		return bias
 	}
 	g.end += size
+	log.Printf("g.end - %d", g.end)
 	if g.end >= len(g.text) {
 	}
 	copy(g.text[p+size:], g.text[p:g.end-size])
@@ -313,6 +357,7 @@ func main() {
 	}
 	defer file.Close()
 	log.SetOutput(file)
+	// syscall.Dup3(int(file.Fd()), int(os.Stderr.Fd()), 0)
 	// var c int
 	var g globals
 	g.init()
