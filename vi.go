@@ -134,6 +134,15 @@ func (g *globals) format_line(src int) []byte {
 			if c == '\n' {
 				break
 			}
+			if c < ' ' || c == 0x7f {
+				if c == '\t' {
+					c = ' '
+					for co%g.tabstop != g.tabstop-1 {
+						dest[co] = c
+						co++
+					}
+				}
+			}
 		}
 		dest[co] = c
 		co++
@@ -141,8 +150,13 @@ func (g *globals) format_line(src int) []byte {
 			break
 		}
 	}
-	log.Printf("format line start %v, %s, co %v", src, dest[:co], co)
-	return dest[:co]
+	// log.Printf("format line start %v, %s, co %v", src, dest[:co], co)
+	if co < g.columns {
+		for i := co; i < g.columns; i++ {
+			dest[i] = ' '
+		}
+	}
+	return dest[:]
 }
 
 func (g *globals) begin_line(d int) int { // return index to first char for cur line
@@ -166,23 +180,51 @@ func (g *globals) end_line(p int) int {
 	}
 	return p
 }
+
+func (g *globals) prev_line(p int) int {
+	p = g.begin_line(p)
+	if p > 0 && p < g.end && g.text[p-1] == '\n' {
+		p--
+	}
+	p = g.begin_line(p)
+	return p
+}
+
 func (g *globals) next_line(p int) int {
 	p = g.end_line(p)
-	log.Printf("end line p %d, g.end %d", p, g.end)
 	if p < g.end && g.text[p] == '\n' {
 		p++
 	}
 	return p
 }
 
+func (g *globals) end_screen() int {
+	q := g.screenbegin
+	for cnt := 0; cnt < g.rows-2; cnt++ {
+		q = g.next_line(q)
+	}
+	q = g.end_line(q)
+	return q
+}
+
 //----- Synchronize the cursor to Dot --------------------------
 func (g *globals) sync_cursor(d int, row, col *int) {
 	var co, ro = 0, 0
 	beg_cur := g.begin_line(d)
-	log.Printf("sync cursor beg_cur %d, screenbegin %d",
-		beg_cur, g.screenbegin)
+	//log.Printf("sync cursor beg_cur %d, screenbegin %d",
+	// 	beg_cur, g.screenbegin)
 	if beg_cur < g.screenbegin {
+		// cnt := g.count_lines(g.text[beg_cur:g.screenbegin])
+		g.screenbegin = beg_cur
 	} else {
+		end_scr := g.end_screen()
+		if beg_cur > end_scr {
+			cnt := g.count_lines(g.text[end_scr:beg_cur])
+			log.Printf("sync cursor update screenbegin %v,%v", d, g.screenbegin)
+			for ro = 0; ro < cnt; ro++ {
+				g.screenbegin = g.next_line(g.screenbegin)
+			}
+		}
 	}
 	tp := g.screenbegin
 	for ro = 0; ro < g.rows-1; ro++ {
@@ -215,7 +257,7 @@ func (g *globals) refresh(full_screen bool) {
 			}
 			tp += n + 1
 		}
-		log.Printf("refresh tp %d", tp)
+		// log.Printf("refresh tp %d", tp)
 
 		changed := false
 		var cs = 0
@@ -225,7 +267,7 @@ func (g *globals) refresh(full_screen bool) {
 		// compare newly formatted buffer with virtual screen
 		// look backward for last difference between out_buf and screen
 		for ; cs <= ce; cs++ {
-			if cs < len(out_buf) && out_buf[cs] != sp[cs] {
+			if out_buf[cs] != sp[cs] {
 				changed = true
 				break
 			}
@@ -233,13 +275,18 @@ func (g *globals) refresh(full_screen bool) {
 
 		// look backward for last difference between out_buf and screen
 		for ; ce >= cs; ce-- {
-			if ce < len(out_buf) && out_buf[ce] != sp[ce] {
+			if out_buf[ce] != sp[ce] {
 				changed = true
 				break
 			}
 		}
+		cs = TernaryInt(cs < 0, 0, cs)
+		ce = TernaryInt(ce > g.columns-1, g.columns-1, ce)
+		if cs > ce {
+			cs, ce = 0, g.columns-1
+		}
 		if changed {
-			log.Printf("%s,%d,%d,li:%d\n", out_buf, cs, ce, li)
+			log.Printf("li:%d,%2d,%2d,cnt:%s-%s\n", li, cs, ce, sp[:ce+1], out_buf[:ce+1])
 			copy(sp[cs:], out_buf[cs:ce+1])
 			g.place_cursor(li, cs)
 			fmt.Printf("%s", sp[cs:ce+1])
@@ -259,6 +306,14 @@ func (g *globals) new_screen(row, col int) {
 	for li := 1; li < row-1; li++ {
 		g.screen[li*col] = '~'
 	}
+}
+
+func (g *globals) dot_next() {
+	g.dot = g.next_line(g.dot)
+}
+
+func (g *globals) dot_prev() {
+	g.dot = g.prev_line(g.dot)
 }
 
 func (g *globals) do_cmd(c int) {
@@ -294,6 +349,10 @@ key_cmd_mode:
 	case 'i', KEYCODE_INSERT: // i- insert before current char // Cursor Key Insert
 		// dc_i:
 		g.cmd_mode = 1 // start inserting
+	case 'j':
+		g.dot_next()
+	case 'k':
+		g.dot_prev()
 	}
 dc1:
 }
