@@ -241,7 +241,6 @@ func (g *globals) refresh(full_screen bool) {
 		if changed {
 			log.Printf("%s,%d,%d,li:%d\n", out_buf, cs, ce, li)
 			copy(sp[cs:], out_buf[cs:ce+1])
-			log.Printf("screen %s", g.screen[:g.end])
 			g.place_cursor(li, cs)
 			fmt.Printf("%s", sp[cs:ce+1])
 		}
@@ -355,11 +354,14 @@ func (g *globals) text_hole_make(p int, size int) int {
 	g.end += size
 	log.Printf("g.end - %d", g.end)
 	if g.end >= len(g.text) {
+		new_text := make([]byte, g.end+10240)
+		copy(new_text, g.text)
+		g.text = new_text
 	}
 	copy(g.text[p+size:], g.text[p:g.end-size])
-	for i := 0; i < size; i++ {
+	/*for i := 0; i < size; i++ {
 		g.text[p+i] = ' '
-	}
+	}*/
 	return bias
 }
 
