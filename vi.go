@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
@@ -20,6 +22,10 @@ const (
 )
 
 const ESC = "\033"
+
+/* Inverse/Normal text */
+const ESC_BOLD_TEXT = ESC + "[7m"
+const ESC_NORM_TEXT = ESC + "[m"
 
 /* Clear-to-end-of-line */
 const ESC_CLEAR2EOL = ESC + "[K"
@@ -41,18 +47,22 @@ type globals struct {
 	rows, columns int // the terminal screen is this size
 	crow, ccol    int // cursor is on Crow x Ccol
 
-	screenbegin int
-	end         int
-	tabstop     int
-	dot         int
-	cmd_mode    int
-
+	screenbegin     int
+	end             int
+	tabstop         int
+	dot             int
+	cmd_mode        int
+	modified_count  int
+	erase_char      int
 	last_input_char byte
 
 	term_orig syscall.Termios
 
-	scr_out_buf [MAX_SCR_COLS + MAX_TABSTOP*2]byte
-	readbuffer  [KEYCODE_BUFFER_SIZE]byte
+	scr_out_buf         [MAX_SCR_COLS + MAX_TABSTOP*2]byte
+	readbuffer          [KEYCODE_BUFFER_SIZE]byte
+	get_input_line__buf [MAX_INPUT_LEN]byte
+	current_filename    string
+	status_buffer       bytes.Buffer
 }
 
 func (g *globals) init() {
@@ -78,6 +88,16 @@ func (g *globals) place_cursor(row, col int) {
 	fmt.Printf(ESC_SET_CURSOR_POS, row+1, col+1)
 }
 
+//----- Erase from cursor to end of line -----------------------
+func (g *globals) clear_to_eol() {
+	fmt.Printf(ESC_CLEAR2EOL)
+}
+
+func (g *globals) go_bottom_and_clear_to_eol() {
+	g.place_cursor(g.rows-1, 0)
+	g.clear_to_eol()
+}
+
 //----- Erase from cursor to end of screen -----------------------
 func (g *globals) clear_to_eos() {
 	fmt.Printf(ESC_CLEAR2EOS)
@@ -89,6 +109,18 @@ func (g *globals) redraw(full_screen bool) {
 	g.clear_to_eos()
 	g.screen_erase()
 	g.refresh(full_screen)
+}
+
+//----- Draw the status line at bottom of the screen -------------
+func (g *globals) show_status_line() {
+	if g.status_buffer.Len() == 0 {
+	}
+	if g.status_buffer.Len() > 0 {
+		g.go_bottom_and_clear_to_eol()
+		fmt.Printf("%s", g.status_buffer.Bytes())
+		g.status_buffer.Reset()
+		g.place_cursor(g.crow, g.ccol)
+	}
 }
 
 func (g *globals) format_line(src int) []byte {
@@ -230,17 +262,6 @@ func (g *globals) new_screen(row, col int) {
 	}
 }
 
-func (g *globals) get_one_char() int {
-	var c [1]byte
-	n, err := os.Stdin.Read(c[:])
-	if err != nil || n != 1 {
-		log.Printf("read n %v, err %v", n, err)
-		g.cookmode()
-		os.Exit(1)
-	}
-	return int(c[0])
-}
-
 func (g *globals) do_cmd(c int) {
 	log.Printf("do cmd %d", c)
 	switch c {
@@ -268,11 +289,62 @@ key_cmd_mode:
 	switch c {
 	case 27: // esc
 		g.cmd_mode = 0
+	case ':': //:- the colon mode commands
+		p := g.get_input_line(":") // get input line- use "status line"
+		g.colon(p)                 // execute the command
 	case 'i', KEYCODE_INSERT: // i- insert before current char // Cursor Key Insert
 		// dc_i:
 		g.cmd_mode = 1 // start inserting
 	}
 dc1:
+}
+
+func (g *globals) colon(c string) {
+	if len(c) == 0 {
+		return
+	}
+	if c[0] == ':' {
+		c = c[1:]
+	}
+	if strings.HasPrefix(c, "quit") || strings.HasPrefix(c, "q!") {
+		g.editing = 0
+		return
+	}
+	if strings.HasPrefix(c, "write") || strings.HasPrefix(c, "wq") || c == "x" {
+		var err error
+		if g.modified_count != 0 || c != "x" {
+			err = g.file_write(g.current_filename, g.text[:g.end])
+		}
+		if err != nil {
+			g.status_line_bold("Write error: %v", err)
+		} else {
+			g.modified_count = 0
+			g.status_line("%s %dL %dC written",
+				g.current_filename, g.count_lines(g.text[:g.end]), g.end)
+			if c == "x" || c[1] == 'q' {
+				g.editing = 0
+			}
+		}
+		return
+	}
+}
+
+func (g *globals) count_lines(cnt []byte) int {
+	return strings.Count(string(cnt), "\n")
+}
+
+func (g *globals) status_line_bold(f string, a ...interface{}) {
+	g.status_buffer.WriteString(ESC_BOLD_TEXT)
+	fmt.Fprintf(&g.status_buffer, f, a...)
+	g.status_buffer.WriteString(ESC_NORM_TEXT)
+}
+
+func (g *globals) status_line(f string, a ...interface{}) {
+	fmt.Fprintf(&g.status_buffer, f, a...)
+}
+
+func (g *globals) file_write(f string, cnt []byte) error {
+	return ioutil.WriteFile(f, cnt, 0666)
 }
 
 func (g *globals) text_hole_make(p int, size int) int {
@@ -298,6 +370,34 @@ func (g *globals) stupid_insert(p int, c int) int {
 	return bias
 }
 
+func (g *globals) file_insert(f string, p int, initial bool) int {
+	var cnt int = -1
+	var err error
+	var file *os.File
+
+	if p < 0 {
+		p = 0
+	}
+	if p > g.end {
+		p = g.end
+	}
+	file, err = os.Open(f)
+	if err != nil {
+		if !initial {
+		}
+		return cnt
+	}
+	defer file.Close()
+	stat, _ := file.Stat()
+	var size = int(stat.Size())
+	n := g.text_hole_make(p, size)
+	cnt, err = file.Read(g.text[p : p+size])
+	if err != nil {
+	} else if cnt < n {
+	}
+	return cnt
+}
+
 func (g *globals) char_insert(p int, c int) int {
 	if c == 27 { // Is this an ESC?
 		g.cmd_mode = 0
@@ -305,6 +405,7 @@ func (g *globals) char_insert(p int, c int) int {
 		if c == '\r' {
 			c = '\n'
 		}
+		g.modified_count++
 		p += 1 + g.stupid_insert(p, c)
 	}
 	return p
@@ -313,7 +414,16 @@ func (g *globals) char_insert(p int, c int) int {
 func (g *globals) init_text_buffer(f string) {
 	g.text = make([]byte, 10240)
 	g.screenbegin = 0
+	g.dot = 0
 	g.end = 0
+	if f != g.current_filename {
+		g.current_filename = f
+	}
+	rc := g.file_insert(f, g.dot, true)
+	if rc < 0 {
+		g.char_insert(g.dot, '\n')
+	}
+	g.modified_count = 0
 }
 
 func (g *globals) edit_file(f string) {
@@ -337,14 +447,59 @@ func (g *globals) edit_file(f string) {
 		g.do_cmd(c)
 		if g.readbuffer[0] == 0 {
 			g.refresh(false)
+			g.show_status_line()
 		}
 	}
 	g.cookmode()
 }
 
+//----- IO Routines --------------------------------------------
+func (g *globals) get_one_char() int {
+	var c [1]byte
+	n, err := os.Stdin.Read(c[:])
+	if err != nil || n != 1 {
+		log.Printf("read n %v, err %v", n, err)
+		g.cookmode()
+		os.Exit(1)
+	}
+	return int(c[0])
+}
+
+// Get input line (uses "status line" area)
+func (g *globals) get_input_line(prompt string) string {
+	buf := g.get_input_line__buf
+	copy(buf[:], prompt)
+	g.go_bottom_and_clear_to_eol()
+	fmt.Printf(prompt)
+
+	var c int
+	i := len(prompt)
+	for i < MAX_INPUT_LEN {
+		c = g.get_one_char()
+		if c == '\n' || c == '\r' || c == 27 {
+			break
+		}
+		if c == g.erase_char || c == 8 || c == 127 {
+			i--
+			buf[i] = ' '
+			fmt.Printf("\b \b")
+			if i <= 0 {
+				break
+			}
+		} else if c > 0 && c < 256 {
+			buf[i] = byte(c)
+			i++
+			fmt.Printf("%s", string(byte(c)))
+		}
+	}
+	g.refresh(false)
+	return string(buf[:i])
+}
+
 //----- Set terminal attributes --------------------------------
 func (g *globals) rawmode() error {
 	SetTermiosToRaw(int(os.Stdin.Fd()), &g.term_orig, TERMIOS_RAW_CRNL)
+	g.erase_char = int(g.term_orig.Cc[syscall.VERASE])
 	return nil
 }
 
