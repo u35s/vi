@@ -109,6 +109,7 @@ func (g *globals) format_line(src int) []byte {
 			break
 		}
 	}
+	log.Printf("format line start %v, %s, co %v", src, dest[:co], co)
 	return dest[:co]
 }
 
@@ -180,8 +181,9 @@ func (g *globals) refresh(full_screen bool) {
 			if n < 0 {
 				n = g.end - 1
 			}
-			tp = n + 1
+			tp += n + 1
 		}
+		log.Printf("refresh tp %d", tp)
 
 		changed := false
 		var cs = 0
@@ -204,9 +206,10 @@ func (g *globals) refresh(full_screen bool) {
 				break
 			}
 		}
-		log.Printf("%s,%d,%d,li:%d\n", out_buf, cs, ce, li)
 		if changed {
+			log.Printf("%s,%d,%d,li:%d\n", out_buf, cs, ce, li)
 			copy(sp[cs:], out_buf[cs:ce+1])
+			log.Printf("screen %s", g.screen[:g.end])
 			g.place_cursor(li, cs)
 			fmt.Printf("%s", sp[cs:ce+1])
 		}
