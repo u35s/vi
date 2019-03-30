@@ -326,10 +326,21 @@ func (g *globals) dot_begin() {
 	g.dot = g.begin_line(g.dot)
 }
 
+func (g *globals) dot_left() {
+	if g.dot > 0 && g.text[g.dot-1] != '\n' {
+		g.dot--
+	}
+}
+
 func (g *globals) dot_prev() {
 	g.dot = g.prev_line(g.dot)
 }
 
+func (g *globals) dot_right() {
+	if g.dot < g.end-1 && g.text[g.dot+1] != '\n' {
+		g.dot++
+	}
+}
 func (g *globals) do_cmd(c int) {
 	log.Printf("do cmd %d", c)
 	switch c {
@@ -384,10 +395,26 @@ key_cmd_mode:
 			g.dot = g.find_line(g.cmdcnt)
 		}
 		g.dot_skip_over_ws()
+	case 'h':
+		for {
+			g.dot_left()
+			g.cmdcnt--
+			if g.cmdcnt <= 0 {
+				break
+			}
+		}
 	case 'j':
 		g.dot_next()
 	case 'k':
 		g.dot_prev()
+	case 'l':
+		for {
+			g.dot_right()
+			g.cmdcnt--
+			if g.cmdcnt <= 0 {
+				break
+			}
+		}
 	}
 dc1:
 	if !unicode.IsDigit(rune(c)) {
