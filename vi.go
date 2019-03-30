@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode"
 )
 
 const (
@@ -52,6 +53,7 @@ type globals struct {
 	tabstop         int
 	dot             int
 	cmd_mode        int
+	cmdcnt          int
 	modified_count  int
 	erase_char      int
 	last_input_char byte
@@ -121,6 +123,14 @@ func (g *globals) show_status_line() {
 		g.status_buffer.Reset()
 		g.place_cursor(g.crow, g.ccol)
 	}
+}
+
+func (g *globals) find_line(li int) int {
+	var dot = 0
+	for ; li > 1; li-- {
+		dot = g.next_line(dot)
+	}
+	return dot
 }
 
 func (g *globals) format_line(src int) []byte {
@@ -312,6 +322,10 @@ func (g *globals) dot_next() {
 	g.dot = g.next_line(g.dot)
 }
 
+func (g *globals) dot_begin() {
+	g.dot = g.begin_line(g.dot)
+}
+
 func (g *globals) dot_prev() {
 	g.dot = g.prev_line(g.dot)
 }
@@ -341,6 +355,12 @@ func (g *globals) do_cmd(c int) {
 	}
 key_cmd_mode:
 	switch c {
+	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		if c == '0' && g.cmdcnt < 1 {
+			g.dot_begin()
+		} else {
+			g.cmdcnt = g.cmdcnt*10 + (c - '0')
+		}
 	case 27: // esc
 		g.cmd_mode = 0
 	case ':': //:- the colon mode commands
@@ -349,12 +369,38 @@ key_cmd_mode:
 	case 'i', KEYCODE_INSERT: // i- insert before current char // Cursor Key Insert
 		// dc_i:
 		g.cmd_mode = 1 // start inserting
+	case 'g', 'G':
+		if c == 'g' {
+			c1 := g.get_one_char()
+			if c1 != 'g' {
+				break
+			}
+			if g.cmdcnt == 0 {
+				g.cmdcnt = 1
+			}
+		}
+		g.dot = g.end - 1
+		if g.cmdcnt > 0 {
+			g.dot = g.find_line(g.cmdcnt)
+		}
+		g.dot_skip_over_ws()
 	case 'j':
 		g.dot_next()
 	case 'k':
 		g.dot_prev()
 	}
 dc1:
+	if !unicode.IsDigit(rune(c)) {
+		g.cmdcnt = 0
+	}
+}
+
+func (g *globals) dot_skip_over_ws() {
+	b := g.text[g.dot]
+	for unicode.IsSpace(rune(b)) && b != '\n' && g.dot < g.end-1 {
+		g.dot++
+		b = g.text[g.dot]
+	}
 }
 
 func (g *globals) colon(c string) {
@@ -462,6 +508,7 @@ func (g *globals) file_insert(f string, p int, initial bool) int {
 func (g *globals) char_insert(p int, c int) int {
 	if c == 27 { // Is this an ESC?
 		g.cmd_mode = 0
+		g.cmdcnt = 0
 	} else {
 		if c == '\r' {
 			c = '\n'
