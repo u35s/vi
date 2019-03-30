@@ -183,7 +183,7 @@ func (g *globals) end_line(p int) int {
 
 func (g *globals) prev_line(p int) int {
 	p = g.begin_line(p)
-	if p > 0 && p < g.end && g.text[p-1] == '\n' {
+	if p > 0 && p <= g.end && g.text[p-1] == '\n' {
 		p--
 	}
 	p = g.begin_line(p)
@@ -228,7 +228,7 @@ func (g *globals) sync_cursor(d int, row, col *int) {
 	}
 	tp := g.screenbegin
 	for ro = 0; ro < g.rows-1; ro++ {
-		log.Printf("sync cursor tp %d, beg_cur %d", tp, beg_cur)
+		// log.Printf("sync cursor tp %d, beg_cur %d", tp, beg_cur)
 		if tp == beg_cur {
 			break
 		}
@@ -242,7 +242,7 @@ func (g *globals) sync_cursor(d int, row, col *int) {
 	}
 	*row = ro
 	*col = co
-	log.Printf("sync cursor row %d,col %d", ro, co)
+	// log.Printf("sync cursor row %d,col %d", ro, co)
 }
 
 func (g *globals) refresh(full_screen bool) {
@@ -286,7 +286,7 @@ func (g *globals) refresh(full_screen bool) {
 			cs, ce = 0, g.columns-1
 		}
 		if changed {
-			log.Printf("li:%d,%2d,%2d,cnt:%s-%s\n", li, cs, ce, sp[:ce+1], out_buf[:ce+1])
+			// log.Printf("li:%d,%2d,%2d,cnt:%s-%s\n", li, cs, ce, sp[:ce+1], out_buf[:ce+1])
 			copy(sp[cs:], out_buf[cs:ce+1])
 			g.place_cursor(li, cs)
 			fmt.Printf("%s", sp[cs:ce+1])
