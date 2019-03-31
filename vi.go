@@ -336,6 +336,10 @@ func (g *globals) dot_prev() {
 	g.dot = g.prev_line(g.dot)
 }
 
+func (g *globals) dot_end() {
+	g.dot = g.end_line(g.dot)
+}
+
 func (g *globals) dot_right() {
 	if g.dot < g.end-1 && g.text[g.dot+1] != '\n' {
 		g.dot++
@@ -377,6 +381,14 @@ key_cmd_mode:
 	case ':': //:- the colon mode commands
 		p := g.get_input_line(":") // get input line- use "status line"
 		g.colon(p)                 // execute the command
+	case 'a':
+		if g.text[g.dot] != '\n' {
+			g.dot++
+			g.cmd_mode = 1
+		}
+	case 'A':
+		g.dot_end()
+		g.cmd_mode = 1 // start inserting
 	case 'i', KEYCODE_INSERT: // i- insert before current char // Cursor Key Insert
 		// dc_i:
 		g.cmd_mode = 1 // start inserting
