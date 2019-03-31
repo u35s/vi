@@ -6,10 +6,12 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
 	"unicode"
+	"unsafe"
 )
 
 const (
@@ -68,6 +70,15 @@ type globals struct {
 }
 
 func (g *globals) init() {
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGWINCH)
+	go func() {
+		for range c {
+			g.query_screen_dimensions()
+			g.new_screen(g.rows, g.columns)
+			g.redraw(true)
+		}
+	}()
 }
 
 //----- Terminal Drawing ---------------------------------------
@@ -273,23 +284,27 @@ func (g *globals) refresh(full_screen bool) {
 		var cs = 0
 		ce := g.columns - 1
 		sp := g.screen[li*g.columns:]
+		if full_screen {
+			changed = true
+		} else {
+			// compare newly formatted buffer with virtual screen
+			// look backward for last difference between out_buf and screen
+			for ; cs <= ce; cs++ {
+				if out_buf[cs] != sp[cs] {
+					changed = true
+					break
+				}
+			}
 
-		// compare newly formatted buffer with virtual screen
-		// look backward for last difference between out_buf and screen
-		for ; cs <= ce; cs++ {
-			if out_buf[cs] != sp[cs] {
-				changed = true
-				break
+			// look backward for last difference between out_buf and screen
+			for ; ce >= cs; ce-- {
+				if out_buf[ce] != sp[ce] {
+					changed = true
+					break
+				}
 			}
 		}
 
-		// look backward for last difference between out_buf and screen
-		for ; ce >= cs; ce-- {
-			if out_buf[ce] != sp[ce] {
-				changed = true
-				break
-			}
-		}
 		cs = TernaryInt(cs < 0, 0, cs)
 		ce = TernaryInt(ce > g.columns-1, g.columns-1, ce)
 		if cs > ce {
@@ -389,6 +404,8 @@ key_cmd_mode:
 	case 'A':
 		g.dot_end()
 		g.cmd_mode = 1 // start inserting
+	case '$':
+		g.dot_end()
 	case 'i', KEYCODE_INSERT: // i- insert before current char // Cursor Key Insert
 		// dc_i:
 		g.cmd_mode = 1 // start inserting
@@ -490,6 +507,25 @@ func (g *globals) file_write(f string, cnt []byte) error {
 	return ioutil.WriteFile(f, cnt, 0666)
 }
 
+func (g *globals) query_screen_dimensions() {
+	var winsize = &struct {
+		Row    uint16
+		Col    uint16
+		Xpixel uint16
+		Ypixel uint16
+	}{}
+	retCode, _, _ := syscall.Syscall(syscall.SYS_IOCTL,
+		uintptr(syscall.Stdin),
+		uintptr(syscall.TIOCGWINSZ),
+		uintptr(unsafe.Pointer(winsize)))
+
+	if int(retCode) == -1 {
+	} else {
+		g.rows = int(winsize.Row)
+		g.columns = int(winsize.Col)
+	}
+}
+
 func (g *globals) text_hole_make(p int, size int) int {
 	var bias int = 0
 	if size <= 0 {
@@ -578,6 +614,7 @@ func (g *globals) edit_file(f string) {
 	g.rawmode()
 	g.rows = 24
 	g.columns = 80
+	g.query_screen_dimensions()
 	g.new_screen(g.rows, g.columns)
 	g.init_text_buffer(f)
 
