@@ -433,9 +433,21 @@ key_cmd_mode:
 			}
 		}
 	case 'j':
-		g.dot_next()
+		for {
+			g.dot_next()
+			g.cmdcnt--
+			if g.cmdcnt <= 0 {
+				break
+			}
+		}
 	case 'k':
-		g.dot_prev()
+		for {
+			g.dot_prev()
+			g.cmdcnt--
+			if g.cmdcnt <= 0 {
+				break
+			}
+		}
 	case 'l':
 		for {
 			g.dot_right()
