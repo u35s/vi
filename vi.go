@@ -67,6 +67,7 @@ type globals struct {
 	get_input_line__buf [MAX_INPUT_LEN]byte
 	current_filename    string
 	status_buffer       bytes.Buffer
+	last_search_pattern string
 }
 
 func (g *globals) init() {
@@ -341,6 +342,24 @@ func (g *globals) dot_begin() {
 	g.dot = g.begin_line(g.dot)
 }
 
+func (g *globals) char_search(p int, pat string, dir_and_range int) int {
+	if p < 0 || p >= g.end {
+		return -1
+	}
+	if dir_and_range > 0 {
+		n := strings.Index(string(g.text[p:g.end]), pat)
+		if n >= 0 {
+			return g.dot + n
+		}
+	} else {
+		n := strings.LastIndex(string(g.text[0:p]), pat)
+		if n >= 0 {
+			return n
+		}
+	}
+	return -1
+}
+
 func (g *globals) dot_left() {
 	if g.dot > 0 && g.text[g.dot-1] != '\n' {
 		g.dot--
@@ -385,6 +404,27 @@ func (g *globals) do_cmd(c int) {
 	}
 key_cmd_mode:
 	switch c {
+	case '/', '?':
+		s := g.get_input_line(string(c))
+		if len(s) == 1 { // if no pat re-use old pat
+
+		} else {
+			g.last_search_pattern = s
+			p := g.char_search(g.dot, s[1:], TernaryInt(c == '/', 1, -1))
+			if p >= 0 {
+				g.dot = p
+			}
+		}
+	case 'n', 'N':
+		s := g.last_search_pattern
+		log.Printf("%s %s,", string(byte(c)), s)
+		if len(s) > 0 {
+			p := g.char_search(g.dot+1, s[1:], TernaryInt(c == 'n', 1, -1))
+			log.Printf("%s %s,cur %d p %d,end %d", string(byte(c)), s, g.dot, p, g.end)
+			if p >= 0 {
+				g.dot = p
+			}
+		}
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 		if c == '0' && g.cmdcnt < 1 {
 			g.dot_begin()
