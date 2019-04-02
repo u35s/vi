@@ -259,12 +259,24 @@ func (g *globals) sync_cursor(d int, row, col *int) {
 
 	// find out what col "d" is on
 	for tp < d {
+		if g.text[tp] == '\n' {
+			break
+		} else if g.text[tp] == '\t' {
+			co = g.next_tabstop(co)
+		} else if g.text[tp] < ' ' || g.text[tp] == 0x7f {
+			co++ // display as ^X, use 2 columns
+		}
+		log.Printf("tp %d,co %d,d %d", tp, co, d)
 		co++
 		tp++
 	}
 	*row = ro
 	*col = co
 	// log.Printf("sync cursor row %d,col %d", ro, co)
+}
+
+func (g *globals) next_tabstop(col int) int {
+	return col + ((g.tabstop - 1) - (col % g.tabstop))
 }
 
 func (g *globals) refresh(full_screen bool) {
@@ -347,6 +359,7 @@ func (g *globals) char_search(p int, pat string, dir_and_range int) int {
 		return -1
 	}
 	if dir_and_range > 0 {
+		// log.Printf("char search:%v,pat:%v,text:%s", p, pat, g.text[p:g.end])
 		n := strings.Index(string(g.text[p:g.end]), pat)
 		if n >= 0 {
 			return g.dot + n
@@ -410,9 +423,9 @@ key_cmd_mode:
 
 		} else {
 			g.last_search_pattern = s
-			p := g.char_search(g.dot, s[1:], TernaryInt(c == '/', 1, -1))
+			p := g.char_search(g.dot+1, s[1:], TernaryInt(c == '/', 1, -1))
 			if p >= 0 {
-				g.dot = p
+				g.dot = p + 1
 			}
 		}
 	case 'n', 'N':
@@ -422,7 +435,7 @@ key_cmd_mode:
 			p := g.char_search(g.dot+1, s[1:], TernaryInt(c == 'n', 1, -1))
 			log.Printf("%s %s,cur %d p %d,end %d", string(byte(c)), s, g.dot, p, g.end)
 			if p >= 0 {
-				g.dot = p
+				g.dot = p + 1
 			}
 		}
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
