@@ -6,3 +6,12 @@ func TernaryInt(cond bool, a, b int) int {
 	}
 	return b
 }
+
+func DoWhile(exec func(), stop func() bool) {
+	for {
+		exec()
+		if stop() {
+			break
+		}
+	}
+}

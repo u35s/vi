@@ -270,6 +270,9 @@ func (g *globals) sync_cursor(d int, row, col *int) {
 		co++
 		tp++
 	}
+	if g.text[d] == '\t' {
+		co = co + (g.tabstop - 1)
+	}
 	*row = ro
 	*col = co
 	// log.Printf("sync cursor row %d,col %d", ro, co)
@@ -385,6 +388,24 @@ func (g *globals) dot_prev() {
 
 func (g *globals) dot_end() {
 	g.dot = g.end_line(g.dot)
+}
+
+func (g *globals) move_to_col(p int, l int) int {
+	var co int = 0
+	p = g.begin_line(p)
+	for co < l && p < g.end {
+		if g.text[p] == '\n' {
+			break
+		}
+		if g.text[p] == '\t' {
+			co = g.next_tabstop(co)
+		} else if g.text[p] < ' ' || g.text[p] == 127 {
+			co++ // display as ^X, use 2 columns
+		}
+		co++
+		p++
+	}
+	return p
 }
 
 func (g *globals) dot_right() {
@@ -510,37 +531,33 @@ key_cmd_mode:
 		}
 		g.dot_skip_over_ws()
 	case 'h':
-		for {
-			g.dot_left()
-			g.cmdcnt--
-			if g.cmdcnt <= 0 {
-				break
-			}
-		}
+		DoWhile(g.dot_left, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
 	case 'j':
-		for {
+		DoWhile(func() {
 			g.dot_next()
-			g.cmdcnt--
-			if g.cmdcnt <= 0 {
-				break
-			}
-		}
+			g.dot = g.move_to_col(g.dot, g.ccol)
+		}, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
 	case 'k':
-		for {
+		DoWhile(func() {
 			g.dot_prev()
-			g.cmdcnt--
-			if g.cmdcnt <= 0 {
-				break
-			}
-		}
+			g.dot = g.move_to_col(g.dot, g.ccol)
+		}, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
 	case 'l':
-		for {
-			g.dot_right()
-			g.cmdcnt--
-			if g.cmdcnt <= 0 {
-				break
-			}
+		DoWhile(g.dot_right, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
+	case 'r': // r- replace the current char with user input
+		c1 := g.get_one_char() // get the replacement char
+		if g.text[g.dot] != '\n' {
+			g.text[g.dot] = byte(c1)
 		}
+	case '~': // ~- flip the case of letters   a-z -> A-Z
+		DoWhile(func() {
+			if unicode.IsLower(rune(g.text[g.dot])) {
+				g.text[g.dot] = byte(unicode.ToUpper(rune(g.text[g.dot])))
+			} else if unicode.IsUpper(rune(g.text[g.dot])) {
+				g.text[g.dot] = byte(unicode.ToLower(rune(g.text[g.dot])))
+			}
+			g.dot_right()
+		}, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
 	}
 dc1:
 	if !unicode.IsDigit(rune(c)) {
