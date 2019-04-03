@@ -392,6 +392,30 @@ func (g *globals) dot_right() {
 		g.dot++
 	}
 }
+
+func (g *globals) dot_scroll(cnt, dir int) {
+	for ; cnt > 0; cnt-- {
+		if dir < 0 {
+			// scroll Backwards
+			// ctrl-Y scroll up one line
+			g.screenbegin = g.prev_line(g.screenbegin)
+		} else {
+			// scroll Forwards
+			// ctrl-E scroll down one line
+			g.screenbegin = g.next_line(g.screenbegin)
+		}
+	}
+	// make sure "dot" stays on the screen so we dont scroll off
+	if g.dot < g.screenbegin {
+		g.dot = g.screenbegin
+	}
+	q := g.end_screen() // find new bottom line
+	if g.dot > q {
+		g.dot = g.begin_line(q) // is dot is below bottom line?
+	}
+	g.dot_skip_over_ws()
+}
+
 func (g *globals) do_cmd(c int) {
 	log.Printf("do cmd %d", c)
 	switch c {
@@ -417,6 +441,14 @@ func (g *globals) do_cmd(c int) {
 	}
 key_cmd_mode:
 	switch c {
+	case 2: // ctrl-b  scroll up full screen
+		g.dot_scroll(g.rows-2, -1)
+	case 4: // ctrl-D  scroll down half screen
+		g.dot_scroll((g.rows-2)/2, 1)
+	case 5: // ctrl-E  scroll down one line
+		g.dot_scroll(1, 1)
+	case 6: // ctrl-f  scroll down full screen
+		g.dot_scroll(g.rows-2, 1)
 	case '/', '?':
 		s := g.get_input_line(string(c))
 		if len(s) == 1 { // if no pat re-use old pat
