@@ -544,6 +544,15 @@ key_cmd_mode:
 		}, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
 	case 'l':
 		DoWhile(g.dot_right, func() bool { g.cmdcnt--; return g.cmdcnt <= 0 })
+	case 'O':
+		g.dot_begin()
+		g.dot = g.char_insert(g.dot, '\n')
+		g.dot_prev()
+		g.cmd_mode = 1
+	case 'o':
+		g.dot_end()
+		g.dot = g.char_insert(g.dot, '\n')
+		g.cmd_mode = 1
 	case 'r': // r- replace the current char with user input
 		c1 := g.get_one_char() // get the replacement char
 		if g.text[g.dot] != '\n' {
