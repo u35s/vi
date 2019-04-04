@@ -50,15 +50,16 @@ type globals struct {
 	rows, columns int // the terminal screen is this size
 	crow, ccol    int // cursor is on Crow x Ccol
 
-	screenbegin     int
-	end             int
-	tabstop         int
-	dot             int
-	cmd_mode        int
-	cmdcnt          int
-	modified_count  int
-	erase_char      int
-	last_input_char byte
+	screenbegin       int
+	end               int
+	tabstop           int
+	dot               int
+	cmd_mode          int
+	cmdcnt            int
+	line_number_width int
+	modified_count    int
+	erase_char        int
+	last_input_char   byte
 
 	term_orig syscall.Termios
 
@@ -119,7 +120,7 @@ func (g *globals) clear_to_eos() {
 
 //----- Force refresh of all Lines -----------------------------
 func (g *globals) redraw(full_screen bool) {
-	g.place_cursor(0, 0)
+	g.place_cursor(0, 0+g.line_number_width)
 	g.clear_to_eos()
 	g.screen_erase()
 	g.refresh(full_screen)
@@ -145,10 +146,23 @@ func (g *globals) find_line(li int) int {
 	return dot
 }
 
+func (g *globals) format_line_number(src int) []byte {
+	cnt := g.count_lines(g.text[:src])
+	lastcnt := g.count_lines(g.text[src:])
+	wd := len(fmt.Sprintf("%d", cnt+lastcnt))
+	g.line_number_width = wd + 1
+
+	bts := StrToBytes(fmt.Sprintf("%"+fmt.Sprintf("%d", wd)+"d ", cnt+1))
+	return bts
+}
+
 func (g *globals) format_line(src int) []byte {
 	dest := g.scr_out_buf
+	bts := g.format_line_number(src)
+	copy(dest[:], bts)
+
 	var c byte = '~'
-	var co int = 0
+	var co int = g.line_number_width
 	for co < g.columns+g.tabstop {
 		if src < g.end {
 			c = g.text[src]
@@ -159,7 +173,7 @@ func (g *globals) format_line(src int) []byte {
 			if c < ' ' || c == 0x7f {
 				if c == '\t' {
 					c = ' '
-					for co%g.tabstop != g.tabstop-1 {
+					for (co-g.line_number_width)%g.tabstop != g.tabstop-1 {
 						dest[co] = c
 						co++
 					}
@@ -183,7 +197,7 @@ func (g *globals) format_line(src int) []byte {
 
 func (g *globals) begin_line(d int) int { // return index to first char for cur line
 	if d > 0 && d < len(g.text) {
-		n := strings.LastIndex(string(g.text[:d]), "\n")
+		n := strings.LastIndexByte(BytesToStr(g.text[:d]), '\n')
 		if n < 0 {
 			return 0
 		}
@@ -194,7 +208,7 @@ func (g *globals) begin_line(d int) int { // return index to first char for cur 
 
 func (g *globals) end_line(p int) int {
 	if p >= 0 && p < g.end {
-		n := strings.Index(string(g.text[p:g.end]), "\n")
+		n := strings.IndexByte(BytesToStr(g.text[p:g.end]), '\n')
 		if n < 0 {
 			return g.end
 		}
@@ -270,6 +284,7 @@ func (g *globals) sync_cursor(d int, row, col *int) {
 		co++
 		tp++
 	}
+
 	if g.text[d] == '\t' {
 		co = co + (g.tabstop - 1)
 	}
@@ -288,7 +303,7 @@ func (g *globals) refresh(full_screen bool) {
 	for li := 0; li < g.rows-1; li++ {
 		out_buf := g.format_line(tp)
 		if tp < g.end {
-			n := strings.Index(string(g.text[tp:g.end]), "\n")
+			n := strings.IndexByte(BytesToStr(g.text[tp:g.end]), '\n')
 			if n < 0 {
 				n = g.end - 1
 			}
@@ -333,7 +348,7 @@ func (g *globals) refresh(full_screen bool) {
 			fmt.Printf("%s", sp[cs:ce+1])
 		}
 	}
-	g.place_cursor(g.crow, g.ccol)
+	g.place_cursor(g.crow, g.ccol+g.line_number_width)
 }
 
 func (g *globals) screen_erase() {
@@ -363,12 +378,12 @@ func (g *globals) char_search(p int, pat string, dir_and_range int) int {
 	}
 	if dir_and_range > 0 {
 		// log.Printf("char search:%v,pat:%v,text:%s", p, pat, g.text[p:g.end])
-		n := strings.Index(string(g.text[p:g.end]), pat)
+		n := strings.Index(BytesToStr(g.text[p:g.end]), pat)
 		if n >= 0 {
 			return g.dot + n
 		}
 	} else {
-		n := strings.LastIndex(string(g.text[0:p]), pat)
+		n := strings.LastIndex(BytesToStr(g.text[0:p]), pat)
 		if n >= 0 {
 			return n
 		}
@@ -405,6 +420,7 @@ func (g *globals) move_to_col(p int, l int) int {
 		co++
 		p++
 	}
+	log.Printf("move to col %d,p %d", co, p)
 	return p
 }
 
@@ -613,7 +629,7 @@ func (g *globals) colon(c string) {
 }
 
 func (g *globals) count_lines(cnt []byte) int {
-	return strings.Count(string(cnt), "\n")
+	return strings.Count(BytesToStr(cnt), "\n")
 }
 
 func (g *globals) status_line_bold(f string, a ...interface{}) {
