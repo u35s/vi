@@ -149,6 +149,10 @@ func (g *globals) find_line(li int) int {
 func (g *globals) format_line_number(src int) []byte {
 	cnt := g.count_lines(g.text[:src])
 	lastcnt := g.count_lines(g.text[src:])
+	if lastcnt == 0 {
+		g.line_number_width = 0
+		return nil
+	}
 	wd := len(fmt.Sprintf("%d", cnt+lastcnt))
 	g.line_number_width = wd + 1
 
